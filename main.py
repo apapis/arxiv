@@ -1,4 +1,5 @@
 import requests
+from bs4 import BeautifulSoup
 import json
 from dotenv import load_dotenv
 import os
@@ -10,9 +11,28 @@ QUESTIONS_URL = os.getenv("API_URL")
 def fetch_article_content(url):
     try:
         response = requests.get(url)
-        print("\nRaw article response:")
-        print(response.text)
-        return response.text
+        soup = BeautifulSoup(response.text, 'html.parser')
+
+        text_content = soup.get_text()
+
+        images = []
+        for img in soup.find_all('img'):
+            images.append({
+                'src': img['src'],
+                'caption': img.find_next('figcaption').text if img.find_next('figcaption') else None
+            })
+
+        audio = []
+        for audio_tag in soup.find_all('audio'):
+            source = audio_tag.find('source')
+            if source and source['src']:
+                audio.append(source['src'])
+
+        return {
+            'text': text_content,
+            'images': images,
+            'audio': audio
+        }
     except Exception as e:
         print(f"Error: {e}")
         return ""
@@ -37,7 +57,10 @@ def analyze_content(article, questions):
 def main():
     article = fetch_article_content(ARTICLE_URL)
     questions = fetch_questions(QUESTIONS_URL)
-    analyze_content(article, questions)
+    print("Article structure:")
+    print(json.dumps(article, indent=4, ensure_ascii=False))
+    print("\nQuestions:")
+    print(questions)
 
 if __name__ == "__main__":
     main()

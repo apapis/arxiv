@@ -5,6 +5,7 @@ from bs4 import BeautifulSoup
 import json
 from dotenv import load_dotenv
 import os
+import base64
 
 load_dotenv()
 ARTICLE_URL = os.getenv("DATA_URL")
@@ -99,10 +100,57 @@ def summarize_chunk(chunk, questions):
         print(f"Error in chunk summary: {e}")
         return ""
 
+def encode_image(image_url):
+    response = requests.get(image_url)
+    return base64.b64encode(response.content).decode('utf-8')
+
+@observe(name="analyze_images")
+def analyze_images(images):
+    try:
+        base_url = "https://centrala.ag3nts.org/dane/"
+        images_descriptions = []
+        for image in images:
+            try:
+                full_image_url = base_url + image['src']
+                base64_image = encode_image(full_image_url)
+                
+                response = openai.chat.completions.create(
+                    model="gpt-4o",
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": "Szczegółowo opisz co widzisz na tym obrazku. Podpis obrazka to: " + (image['caption'] or 'brak podpisu')
+                                },
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:image/jpeg;base64,{base64_image}"
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                )
+                
+                print(f"Successfully analyzed image: {full_image_url}")
+                images_descriptions.append(f"Opis obrazka {image['src']}:\n{response.choices[0].message.content}")
+            except Exception as img_e:
+                print(f"Error processing image {full_image_url}: {img_e}")
+                continue
+                
+        return "\n\n".join(images_descriptions)
+    except Exception as e:
+        print(f"Error in image analysis: {e}")
+        return ""
+
 @observe(name="analyze_arxiv_text")
 def analyze_article_text(article_data, questions):
     summaries = []
     
+    # Analiza tekstu
     for section in article_data['text_sections']:
         if len(section.strip()) > 0:
             summary = summarize_chunk(section, questions)
@@ -112,7 +160,7 @@ def analyze_article_text(article_data, questions):
     try:
         full_summary = "\n\n".join(summaries)
         response = openai.chat.completions.create(
-            model="gpt-4",
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": """Przeanalizuj dokładnie wszystkie streszczenia i znajdź w nich konkretne informacje odpowiadające na pytania. 
                 Nie odpowiadaj 'brak informacji' jeśli informacja znajduje się w którejkolwiek części streszczeń.
@@ -136,7 +184,7 @@ def main():
     article = fetch_article_content(ARTICLE_URL)
     questions = fetch_questions(QUESTIONS_URL)
     answers = analyze_article_text(article, questions)
-    print(answers)
+    print(json.dumps(answers, ensure_ascii=False, indent=4))
 
 if __name__ == "__main__":
     main()

@@ -36,8 +36,21 @@ def fetch_article_content(url):
         soup = BeautifulSoup(response.text, 'html.parser')
         
         body = soup.find('body')
-        sections = body.find_all(['h2', 'p'])
         
+        for img in soup.find_all('img'):
+            caption = img.find_next('figcaption').text if img.find_next('figcaption') else None
+            image_data = {
+                'src': img['src'],
+                'caption': caption
+            }
+            
+            img_description = analyze_single_image(image_data)
+            if img_description:
+                new_p = soup.new_tag("p")
+                new_p.string = f"[OPIS OBRAZKA: {img_description}]"
+                img.replace_with(new_p)
+        
+        sections = body.find_all(['h2', 'p'])
         text_sections = []
         current_section = []
         
@@ -51,26 +64,12 @@ def fetch_article_content(url):
         
         if current_section:
             text_sections.append('\n'.join(current_section))
-
+        
         optimized_sections = combine_sections(text_sections, MAX_CHUNK_LENGTH)
         
-        images = []
-        for img in soup.find_all('img'):
-            images.append({
-                'src': img['src'],
-                'caption': img.find_next('figcaption').text if img.find_next('figcaption') else None
-            })
-
-        audio = []
-        for audio_tag in soup.find_all('audio'):
-            source = audio_tag.find('source')
-            if source and source['src']:
-                audio.append(source['src'])
-
         return {
             'text_sections': optimized_sections,
-            'images': images,
-            'audio': audio
+            'audio': soup.find_all('audio')
         }
     except Exception as e:
         print(f"Error: {e}")
@@ -104,46 +103,38 @@ def encode_image(image_url):
     response = requests.get(image_url)
     return base64.b64encode(response.content).decode('utf-8')
 
-@observe(name="analyze_images")
-def analyze_images(images):
+@observe(name="analyze_single_image")
+def analyze_single_image(image):
     try:
         base_url = "https://centrala.ag3nts.org/dane/"
-        images_descriptions = []
-        for image in images:
-            try:
-                full_image_url = base_url + image['src']
-                base64_image = encode_image(full_image_url)
-                
-                response = openai.chat.completions.create(
-                    model="gpt-4o",
-                    messages=[
+        full_image_url = base_url + image['src']
+        base64_image = encode_image(full_image_url)
+        
+        response = openai.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
                         {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": "Szczegółowo opisz co widzisz na tym obrazku. Podpis obrazka to: " + (image['caption'] or 'brak podpisu')
-                                },
-                                {
-                                    "type": "image_url",
-                                    "image_url": {
-                                        "url": f"data:image/jpeg;base64,{base64_image}"
-                                    }
-                                }
-                            ]
+                            "type": "text",
+                            "text": "Szczegółowo opisz co widzisz na tym obrazku. Podpis obrazka to: " + (image['caption'] or 'brak podpisu')
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64_image}"
+                            }
                         }
                     ]
-                )
-                
-                print(f"Successfully analyzed image: {full_image_url}")
-                images_descriptions.append(f"Opis obrazka {image['src']}:\n{response.choices[0].message.content}")
-            except Exception as img_e:
-                print(f"Error processing image {full_image_url}: {img_e}")
-                continue
-                
-        return "\n\n".join(images_descriptions)
-    except Exception as e:
-        print(f"Error in image analysis: {e}")
+                }
+            ]
+        )
+        
+        print(f"Successfully analyzed image: {full_image_url}")
+        return response.choices[0].message.content
+    except Exception as img_e:
+        print(f"Error processing image {image['src']}: {img_e}")
         return ""
 
 @observe(name="analyze_arxiv_text")

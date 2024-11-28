@@ -49,6 +49,15 @@ def fetch_article_content(url):
                 new_p = soup.new_tag("p")
                 new_p.string = f"[OPIS OBRAZKA: {img_description}]"
                 img.replace_with(new_p)
+
+        for audio_tag in soup.find_all('audio'):
+            source = audio_tag.find('source')
+            if source and source['src']:
+                audio_transcript = analyze_single_audio(source['src'])
+                if audio_transcript:
+                    new_p = soup.new_tag("p")
+                    new_p.string = f"[TRANSKRYPCJA AUDIO: {audio_transcript}]"
+                    audio_tag.replace_with(new_p)
         
         sections = body.find_all(['h2', 'p'])
         text_sections = []
@@ -68,8 +77,7 @@ def fetch_article_content(url):
         optimized_sections = combine_sections(text_sections, MAX_CHUNK_LENGTH)
         
         return {
-            'text_sections': optimized_sections,
-            'audio': soup.find_all('audio')
+            'text_sections': optimized_sections
         }
     except Exception as e:
         print(f"Error: {e}")
@@ -137,6 +145,35 @@ def analyze_single_image(image):
         print(f"Error processing image {image['src']}: {img_e}")
         return ""
 
+@observe(name="analyze_single_audio")
+def analyze_single_audio(audio_url):
+    try:
+        base_url = "https://centrala.ag3nts.org/dane/"
+        full_audio_url = base_url + audio_url
+        response = requests.get(full_audio_url)
+        
+        # Zapisujemy tymczasowo plik audio
+        temp_file_path = "temp_audio.mp3"
+        with open(temp_file_path, "wb") as f:
+            f.write(response.content)
+        
+        # Otwieramy plik i wysyłamy do transkrypcji
+        with open(temp_file_path, "rb") as audio_file:
+            transcript = openai.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_file,
+                language="pl"
+            )
+        
+        # Usuwamy tymczasowy plik
+        os.remove(temp_file_path)
+        
+        print(f"Successfully transcribed audio: {full_audio_url}")
+        return transcript.text
+    except Exception as audio_e:
+        print(f"Error processing audio {audio_url}: {audio_e}")
+        return ""
+    
 @observe(name="analyze_arxiv_text")
 def analyze_article_text(article_data, questions):
     summaries = []
